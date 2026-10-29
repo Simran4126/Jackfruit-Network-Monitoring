@@ -1,100 +1,170 @@
-# Network Monitoring and Alert System
+# Network Monitoring and Alert System Using UDP and SDN
 
 ## 1. Project Overview
 
-The Network Monitoring and Alert System is designed to monitor network-related activity and system resource usage. It combines UDP-based telemetry, a virtual network created using Mininet, and Software-Defined Networking (SDN).
+The Network Monitoring and Alert System monitors CPU and memory utilization on hosts and transmits telemetry data using UDP. It combines a Python-based telemetry system, a Mininet virtual network, Open vSwitch, and a Software-Defined Networking (SDN) controller.
 
-The system collects CPU and memory utilization metrics, transfers the collected data using UDP, records the received metrics, and generates alerts when configured thresholds are reached.
-
-The project also aims to use an SDN controller to communicate with network switches and obtain network traffic statistics.
+The telemetry server validates incoming messages, records valid metrics in a CSV file, and generates alerts when configured thresholds are reached. The SDN controller communicates with Open vSwitch using OpenFlow and collects switch port statistics.
 
 ## 2. Objectives
 
 - Monitor CPU and memory utilization.
-- Collect and transmit telemetry data using UDP sockets.
-- Receive and validate telemetry messages.
-- Store collected metrics in a CSV file.
-- Generate alerts when configured thresholds are reached.
-- Create a virtual network using Mininet.
-- Explore SDN-based network management using OpenFlow.
-- Integrate system monitoring with network traffic monitoring.
+- Transmit telemetry data using UDP sockets.
+- Validate incoming telemetry messages.
+- Store telemetry records in CSV format.
+- Generate alerts when resource utilization reaches configured thresholds.
+- Simulate a network using Mininet.
+- Use an SDN controller to manage OpenFlow switches.
+- Inspect network connectivity, flow rules, and switch port statistics.
 
 ## 3. Technologies Used
 
 - Python
 - UDP sockets
 - psutil
-- CSV
-- JSON
+- JSON and CSV
 - Mininet
 - Open vSwitch
-- Software-Defined Networking (SDN)
-- OpenFlow
+- OpenFlow 1.0
+- OS-Ken SDN controller framework
 - Linux
-
-The exact controller framework and its dependencies will be documented after the controller implementation is integrated.
 
 ## 4. Project Structure
 
 ```text
 network-monitoring-system/
 ├── config.py
-├── topology.py
 ├── requirements.txt
 ├── README.md
+├── controller/
+│   ├── __init__.py
+│   └── sdn_controller.py
+├── network/
+│   ├── topology.py
+│   └── udp_test_server.py
 ├── telemetry/
 │   ├── agent.py
 │   ├── config.py
 │   └── server.py
 ├── tests/
 │   └── test_telemetry.py
-├── logs/
-│   ├── telemetry.csv
-│   └── alerts.log
 ├── docs/
 │   ├── architecture.md
-│   ├── p1-telemetry.md
-│   ├── p2-network.md
-│   └── p3-controller.md
-└── presentation/
-    └── screenshots/
+│   ├── controller.md
+│   ├── network.md
+│   └── telemetry.md
+└── logs/
+    ├── telemetry.csv
+    └── alerts.log
 ```
 
-The controller files and additional documentation may be added when the SDN controller implementation is received and integrated.
+## 5. Configuration
 
-## 5. Installation and Setup
+The root `config.py` file contains the telemetry configuration:
 
-### Step 1: Navigate to the project directory
+```python
+HOST_ID = "h1"
+SERVER_HOST = "127.0.0.1"
+SERVER_PORT = 9999
+SEND_INTERVAL = 2
+
+CPU_THRESHOLD = 80.0
+MEMORY_THRESHOLD = 80.0
+```
+
+When running an agent inside a separate Mininet host namespace, the server address must be reachable from that namespace. The root configuration above uses localhost and is suitable only when the agent and server share the same network namespace.
+
+## 6. Installation Requirements
+
+Install the system dependencies:
+
+```bash
+sudo apt update
+sudo apt install -y python3-venv python3-pip mininet openvswitch-switch iproute2
+```
+
+Create and activate the telemetry environment:
 
 ```bash
 cd ~/network-monitoring-system
-```
-
-### Step 2: Create a virtual environment
-
-```bash
 python3 -m venv .venv
-```
-
-### Step 3: Activate the virtual environment
-
-```bash
 source .venv/bin/activate
-```
-
-### Step 4: Install Python dependencies
-
-```bash
 python -m pip install -r requirements.txt
 ```
 
-Mininet and Open vSwitch require separate system-level setup. The SDN controller may also require additional packages depending on the framework used.
+The SDN controller uses a separate OS-Ken environment in the tested setup:
 
-## 6. Running the Telemetry System
+```bash
+python3 -m venv ~/osken-venv
+source ~/osken-venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install os-ken
+```
 
-Open two terminals in the project directory.
+If `~/osken-venv` already exists, activate it instead of recreating it.
 
-### Terminal 1: Start the UDP server
+## 7. Running the SDN Controller
+
+Open Terminal 1 and run:
+
+```bash
+cd ~/network-monitoring-system
+source ~/osken-venv/bin/activate
+export PYTHONPATH="$HOME/network-monitoring-system:$PYTHONPATH"
+osken-manager --ofp-tcp-listen-port 6633 controller.sdn_controller
+```
+
+Keep this terminal open while running the network.
+
+The controller uses OpenFlow 1.0 and supports MAC learning, forwarding rules, and periodic switch port-statistics requests.
+
+## 8. Launching the Mininet Topology
+
+Open Terminal 2:
+
+```bash
+cd ~/network-monitoring-system
+sudo mn -c
+sudo python3 network/topology.py
+```
+
+The topology contains four hosts and four switches.
+
+- h1 and h2 connect to s1.
+- h3 and h4 connect to s4.
+- The network provides two paths between the endpoint switches.
+- Links are configured with bandwidth limits.
+- Open vSwitch connects to the remote controller at `127.0.0.1:6633`.
+
+Allow the topology's configured startup delay for spanning-tree convergence.
+
+## 9. Testing Network Connectivity
+
+At the `mininet>` prompt, run:
+
+```text
+pingall
+h1 ping -c 2 10.0.0.4
+```
+
+Successful connectivity should show no packet loss.
+
+Inspect the OpenFlow rules with:
+
+```text
+sh ovs-ofctl -O OpenFlow10 dump-flows s1
+sh ovs-ofctl -O OpenFlow10 dump-flows s4
+```
+
+The output displays the flow rules installed on the switches.
+
+## 10. Running the UDP Telemetry System
+
+The telemetry system has an agent that collects resource metrics and a server that receives and records them.
+
+For a basic same-network-namespace test, open two terminals.
+
+Terminal 1:
 
 ```bash
 cd ~/network-monitoring-system
@@ -102,9 +172,7 @@ source .venv/bin/activate
 python -m telemetry.server
 ```
 
-The server receives telemetry messages and records valid metrics in the logs directory.
-
-### Terminal 2: Start the telemetry agent
+Terminal 2:
 
 ```bash
 cd ~/network-monitoring-system
@@ -112,15 +180,13 @@ source .venv/bin/activate
 python -m telemetry.agent
 ```
 
-The agent collects CPU and memory utilization and sends the metrics to the configured UDP server.
+The root configuration uses `127.0.0.1:9999`. For a Mininet demonstration, configure the server and agents to use reachable addresses inside the appropriate host namespaces.
 
-The current configuration uses localhost. This is suitable for testing the agent and server in the same network namespace. The configuration must be updated if the agent runs inside a separate Mininet host namespace.
+The topology includes `network/udp_test_server.py` for network-side UDP testing.
 
-Press Ctrl+C to stop the agent or server.
+## 11. Running the Tests
 
-## 7. Running the Tests
-
-Activate the virtual environment and run:
+Run the telemetry unit tests:
 
 ```bash
 cd ~/network-monitoring-system
@@ -128,64 +194,48 @@ source .venv/bin/activate
 python -m pytest -v tests/test_telemetry.py
 ```
 
-The tests check metric validation, CSV file creation, and alert-generation behavior.
+The telemetry test suite has previously passed all 10 tests.
 
-The current telemetry test suite has passed all 10 tests.
+## 12. Output Files
 
-## 8. Output Files
+### logs/telemetry.csv
 
-### telemetry.csv
+Stores received telemetry records with the following fields:
 
-The file stores the collected telemetry data.
+- `host_id`
+- `timestamp`
+- `cpu_percent`
+- `memory_percent`
 
-The fields include:
+### logs/alerts.log
 
-- host_id
-- timestamp
-- cpu_percent
-- memory_percent
+Stores threshold-based alerts generated by the telemetry server.
 
-### alerts.log
+## 13. Demonstration Workflow
 
-The file records alerts generated when CPU or memory utilization reaches the configured thresholds.
+The intended demonstration follows this order:
 
-## 9. Mininet Network
+1. Start the OS-Ken SDN controller.
+2. Launch the Mininet topology.
+3. Confirm that the switches connect to the controller.
+4. Test connectivity between the hosts.
+5. Inspect OpenFlow rules and switch port statistics.
+6. Start the UDP telemetry server.
+7. Start telemetry agents with valid server addresses.
+8. Verify that telemetry records appear in the CSV file.
+9. Demonstrate threshold-based alerts.
+10. Run the telemetry unit tests.
 
-The project includes a topology.py file intended to create four hosts and four switches connected through two paths between h1 and h4.
+Each component should be checked independently before presenting the integrated demonstration.
 
-The topology and its connectivity must be tested with the selected SDN controller before the complete network demonstration.
+## 14. Limitations and Future Enhancements
 
-## 10. SDN Controller
+- Extend telemetry to include additional system and network metrics.
+- Integrate switch statistics with host telemetry.
+- Add dashboards for CPU, memory, and network activity.
+- Improve alert presentation and anomaly detection.
+- Perform additional end-to-end tests across the Mininet topology.
 
-The SDN controller component is intended to communicate with Open vSwitch using OpenFlow and support the collection of network traffic statistics.
+## 15. Conclusion
 
-The controller framework, installation requirements, launch command, and flow-statistics demonstration will be documented after the controller implementation is integrated.
-
-## 11. Testing and Demonstration
-
-The planned demonstration includes:
-
-1. Starting the SDN controller.
-2. Launching the Mininet topology.
-3. Checking network connectivity.
-4. Starting the UDP telemetry server.
-5. Starting one or more telemetry agents.
-6. Displaying recorded telemetry metrics.
-7. Demonstrating threshold-based alerts.
-8. Displaying SDN flow statistics.
-
-The complete demonstration will be considered successful only after the components have been integrated and tested together.
-
-## 12. Future Enhancements
-
-- Add additional telemetry metrics.
-- Improve the presentation of alerts.
-- Integrate network traffic statistics with telemetry data.
-- Add visualization of CPU, memory, and network activity.
-- Improve anomaly detection and monitoring capabilities.
-
-## 13. Conclusion
-
-The project demonstrates the use of UDP communication for telemetry collection and the use of SDN concepts for network management.
-
-The intended integrated system combines resource monitoring, alert generation, virtual network testing, and SDN-based traffic monitoring.
+The project combines UDP-based telemetry, resource monitoring, threshold-based alerts, Mininet network simulation, and SDN-based switch management. It demonstrates how host monitoring and programmable network management can be explored together in a virtual network.
